@@ -99,6 +99,38 @@ func ParseChannel(buf []byte) (*Channel, error) {
 	}, nil
 }
 
+func ParseMessageInto(msg *Message, buf []byte) error {
+	channelID, offset, err := getUint16(buf, 0)
+	if err != nil {
+		return fmt.Errorf("failed to read channel ID: %w", err)
+	}
+	sequence, offset, err := getUint32(buf, offset)
+	if err != nil {
+		return fmt.Errorf("failed to read sequence: %w", err)
+	}
+	logTime, offset, err := getUint64(buf, offset)
+	if err != nil {
+		return fmt.Errorf("failed to read record time: %w", err)
+	}
+	publishTime, offset, err := getUint64(buf, offset)
+	if err != nil {
+		return fmt.Errorf("failed to read publish time: %w", err)
+	}
+	data := buf[offset:]
+
+	msg.ChannelID = channelID
+	msg.Sequence = sequence
+	msg.LogTime = logTime
+	msg.PublishTime = publishTime
+	if len(msg.Data) > len(data) {
+		copy(msg.Data, data)
+		msg.Data = msg.Data[:len(data)]
+	} else {
+		msg.Data = data
+	}
+	return nil
+}
+
 // ParseMessage parses a message record.
 func ParseMessage(buf []byte) (*Message, error) {
 	channelID, offset, err := getUint16(buf, 0)

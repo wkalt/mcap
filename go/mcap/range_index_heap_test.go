@@ -66,7 +66,7 @@ func TestMessageOrdering(t *testing.T) {
 		t.Run(c.assertion, func(t *testing.T) {
 			h := &rangeIndexHeap{order: c.order}
 			for _, item := range rangeIndexHeapTestItems {
-				assert.Nil(t, h.HeapPush(item))
+				assert.Nil(t, h.HeapPush(&item))
 			}
 			assert.Equal(t, h.Len(), len(rangeIndexHeapTestItems))
 			i := 0

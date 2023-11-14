@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -696,6 +697,59 @@ func assertReadable(t *testing.T, rs io.ReadSeeker) {
 			assert.ErrorIs(t, err, io.EOF)
 			break
 		}
+	}
+}
+
+func TestCreateDenseBag(t *testing.T) {
+	f, err := os.Create("test-bag.mcap")
+	assert.Nil(t, err)
+	defer f.Close()
+
+	writer, err := NewWriter(f, &WriterOptions{
+		Chunked:     true,
+		ChunkSize:   4 * 1024 * 1024,
+		Compression: "zstd",
+	})
+	assert.Nil(t, err)
+	defer writer.Close()
+
+	assert.Nil(t, writer.WriteHeader(&Header{}))
+	assert.Nil(t, writer.WriteSchema(&Schema{
+		ID:       1,
+		Name:     "my-schema1",
+		Encoding: "ros1msg",
+		Data:     []byte{},
+	}))
+	assert.Nil(t, writer.WriteChannel(&Channel{
+		ID:              0,
+		SchemaID:        1,
+		Topic:           "/foo",
+		MessageEncoding: "ros1",
+	}))
+	assert.Nil(t, writer.WriteSchema(&Schema{
+		ID:       2,
+		Name:     "my-schema2",
+		Encoding: "ros1msg",
+		Data:     []byte{},
+	}))
+	assert.Nil(t, writer.WriteChannel(&Channel{
+		ID:              1,
+		SchemaID:        2,
+		Topic:           "/bar",
+		MessageEncoding: "ros1",
+	}))
+
+	for i := 0; i < 20e6; i++ {
+		assert.Nil(t, writer.WriteMessage(&Message{
+			ChannelID: 0,
+			Sequence:  uint32(i),
+			LogTime:   uint64(i),
+		}))
+		assert.Nil(t, writer.WriteMessage(&Message{
+			ChannelID: uint16(i % 2),
+			Sequence:  uint32(i),
+			LogTime:   uint64(i),
+		}))
 	}
 }
 

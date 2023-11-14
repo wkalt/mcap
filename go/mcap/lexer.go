@@ -250,14 +250,14 @@ func (l *Lexer) Next(p []byte) (TokenType, []byte, error) {
 
 		record := p[:recordLen]
 		readLength, err = io.ReadFull(l.reader, record)
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return TokenError, nil, &ErrTruncatedRecord{
-				opcode:      opcode,
-				actualLen:   readLength,
-				expectedLen: recordLen,
-			}
-		}
 		if err != nil {
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				return TokenError, nil, &ErrTruncatedRecord{
+					opcode:      opcode,
+					actualLen:   readLength,
+					expectedLen: recordLen,
+				}
+			}
 			return TokenError, nil, err
 		}
 

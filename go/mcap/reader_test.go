@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -742,4 +743,94 @@ func TestReadingMessageOrderWithOverlappingChunks(t *testing.T) {
 	_, _, msg, err = reverseIt.Next(nil)
 	assert.Nil(t, msg)
 	assert.Error(t, io.EOF, err)
+}
+
+func BenchmarkReaderVsLexer(b *testing.B) {
+	inputfile := "test-bag.mcap"
+	//b.Run("lexer", func(b *testing.B) {
+	//	f, err := os.Open(inputfile)
+	//	assert.Nil(b, err)
+	//	defer f.Close()
+	//	buf := make([]byte, 1024*1024)
+	//	for i := 0; i < b.N; i++ {
+	//		lexer, err := NewLexer(f, &LexerOptions{})
+	//		assert.Nil(b, err)
+	//		b.ResetTimer()
+	//		t0 := time.Now()
+	//		count := 0
+	//		for {
+	//			_, _, err := lexer.Next(buf)
+	//			if err != nil {
+	//				if errors.Is(err, io.EOF) {
+	//					break
+	//				}
+	//			}
+	//			assert.Nil(b, err)
+	//			count++
+	//		}
+	//		b.ReportMetric(time.Since(t0).Seconds(), "elapsed")
+	//		b.ReportMetric(float64(count), "count")
+	//	}
+	//})
+	//b.Run("reader unindexed", func(b *testing.B) {
+	//	f, err := os.Open(inputfile)
+	//	assert.Nil(b, err)
+	//	defer f.Close()
+	//	buf := make([]byte, 1024*1024)
+	//	var channel = &Channel{}
+	//	var schema = &Schema{}
+	//	var msg = &Message{}
+	//	for i := 0; i < b.N; i++ {
+	//		reader, err := NewReader(f)
+	//		assert.Nil(b, err)
+	//		defer reader.Close()
+	//		it, err := reader.Messages(UsingIndex(false), InOrder(FileOrder))
+	//		assert.Nil(b, err)
+	//		b.ResetTimer()
+	//		t0 := time.Now()
+	//		count := 0
+	//		for {
+	//			err := it.NextPreallocated(schema, channel, msg, buf)
+	//			if err != nil {
+	//				if errors.Is(err, io.EOF) {
+	//					break
+	//				}
+	//		assert.Nil(b, err)
+	//			}
+	//			count++
+	//		}
+	//		b.ReportMetric(time.Since(t0).Seconds(), "elapsed")
+	//		b.ReportMetric(float64(count), "count")
+	//	}
+	//})
+	b.Run("reader indexed", func(b *testing.B) {
+		f, err := os.Open(inputfile)
+		assert.Nil(b, err)
+		defer f.Close()
+		buf := make([]byte, 1024*1024)
+		var channel = &Channel{}
+		var schema = &Schema{}
+		var msg = &Message{}
+		for i := 0; i < b.N; i++ {
+			reader, err := NewReader(f)
+			assert.Nil(b, err)
+			it, err := reader.Messages(UsingIndex(true), InOrder(LogTimeOrder))
+			assert.Nil(b, err)
+			b.ResetTimer()
+			t0 := time.Now()
+			count := 0
+			for {
+				err := it.NextPreallocated(schema, channel, msg, buf)
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					assert.Nil(b, err)
+				}
+				count++
+			}
+			b.ReportMetric(time.Since(t0).Seconds(), "elapsed")
+			b.ReportMetric(float64(count), "count")
+		}
+	})
 }

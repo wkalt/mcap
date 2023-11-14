@@ -127,9 +127,10 @@ func (it *indexedMessageIterator) parseSummarySection() error {
 				if idx.MessageIndexOffsets[channel.ID] > 0 {
 					if (it.end == 0 && it.start == 0) || (idx.MessageStartTime < it.end && idx.MessageEndTime >= it.start) {
 						rangeIndex := rangeIndex{
-							chunkIndex: idx,
+							chunkIndex:   idx,
+							isChunkIndex: true,
 						}
-						if err := it.indexHeap.HeapPush(rangeIndex); err != nil {
+						if err := it.indexHeap.HeapPush(&rangeIndex); err != nil {
 							return err
 						}
 					}
@@ -225,7 +226,7 @@ func (it *indexedMessageIterator) loadChunk(chunkIndex *ChunkIndex) error {
 		for i := range messageIndex.Records {
 			timestamp := messageIndex.Records[i].Timestamp
 			if timestamp >= it.start && timestamp < it.end {
-				if err := it.indexHeap.HeapPush(rangeIndex{
+				if err := it.indexHeap.HeapPush(&rangeIndex{
 					chunkIndex:        chunkIndex,
 					messageIndexEntry: &messageIndex.Records[i],
 					buf:               chunkData,
@@ -252,6 +253,64 @@ func readRecord(r io.Reader) (TokenType, []byte, error) {
 		return 0, nil, fmt.Errorf("failed to read record: %w", err)
 	}
 	return tokenType, record, nil
+}
+
+func (it *indexedMessageIterator) NextPreallocated(schema *Schema, channel *Channel, msg *Message, _ []byte) error {
+	if !it.hasReadSummarySection {
+		err := it.parseSummarySection()
+		if err != nil {
+			return err
+		}
+		// take care of the metadata here
+		if it.metadataCallback != nil {
+			for _, idx := range it.metadataIndexes {
+				_, err = it.rs.Seek(int64(idx.Offset), io.SeekStart)
+				if err != nil {
+					return fmt.Errorf("failed to seek to metadata: %w", err)
+				}
+				tokenType, data, err := readRecord(it.rs)
+				if err != nil {
+					return fmt.Errorf("failed to read metadata record: %w", err)
+				}
+				if tokenType != TokenMetadata {
+					return fmt.Errorf("expected metadata record, found %v", data)
+				}
+				metadata, err := ParseMetadata(data)
+				if err != nil {
+					return fmt.Errorf("failed to parse metadata record: %w", err)
+				}
+				err = it.metadataCallback(metadata)
+				if err != nil {
+					return fmt.Errorf("metadata callback failed: %w", err)
+				}
+			}
+		}
+	}
+
+	for it.indexHeap.Len() > 0 {
+		ri, err := it.indexHeap.HeapPop()
+		if err != nil {
+			return err
+		}
+		if ri.isChunkIndex {
+			err := it.loadChunk(ri.chunkIndex)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		chunkOffset := ri.messageIndexEntry.Offset
+		length := binary.LittleEndian.Uint64(ri.buf[chunkOffset+1:])
+		messageData := ri.buf[chunkOffset+1+8 : chunkOffset+1+8+length]
+		err = ParseMessageInto(msg, messageData)
+		if err != nil {
+			return err
+		}
+		*channel = *it.channels[msg.ChannelID]
+		*schema = *it.schemas[channel.SchemaID]
+		return nil
+	}
+	return io.EOF
 }
 
 func (it *indexedMessageIterator) Next(_ []byte) (*Schema, *Channel, *Message, error) {
@@ -291,7 +350,7 @@ func (it *indexedMessageIterator) Next(_ []byte) (*Schema, *Channel, *Message, e
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		if ri.messageIndexEntry == nil {
+		if ri.isChunkIndex {
 			err := it.loadChunk(ri.chunkIndex)
 			if err != nil {
 				return nil, nil, nil, err

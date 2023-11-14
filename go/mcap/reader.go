@@ -66,6 +66,7 @@ type Reader struct {
 
 type MessageIterator interface {
 	Next([]byte) (*Schema, *Channel, *Message, error)
+	NextPreallocated(*Schema, *Channel, *Message, []byte) error
 }
 
 func Range(it MessageIterator, f func(*Schema, *Channel, *Message) error) error {
@@ -92,8 +93,8 @@ func (r *Reader) unindexedIterator(opts ReadOptions) *unindexedMessageIterator {
 	r.l.emitChunks = false
 	return &unindexedMessageIterator{
 		lexer:            r.l,
-		channels:         make(map[uint16]*Channel),
-		schemas:          make(map[uint16]*Schema),
+		channels:         make([]*Channel, 1024),
+		schemas:          make([]*Schema, 1024),
 		topics:           topicMap,
 		start:            uint64(opts.Start),
 		end:              uint64(opts.End),

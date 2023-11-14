@@ -11,11 +11,12 @@ type rangeIndex struct {
 	chunkIndex        *ChunkIndex
 	messageIndexEntry *MessageIndexEntry
 	buf               []uint8 // if messageIndexEntry is not nil, `buf` should point to the underlying chunk.
+	isChunkIndex      bool
 }
 
 // heap of rangeIndex entries, where the entries are sorted by their log time.
 type rangeIndexHeap struct {
-	indices []rangeIndex
+	indices []*rangeIndex
 	order   ReadOrder
 	lastErr error
 }
@@ -23,7 +24,7 @@ type rangeIndexHeap struct {
 // key returns the comparison key used for elements in this heap.
 func (h rangeIndexHeap) timestamp(i int) uint64 {
 	ri := h.indices[i]
-	if ri.messageIndexEntry == nil {
+	if ri.isChunkIndex {
 		if h.order == ReverseLogTimeOrder {
 			return ri.chunkIndex.MessageEndTime
 		}
@@ -43,7 +44,7 @@ func (h *rangeIndexHeap) filePositionLess(i, j int) bool {
 		return a.chunkIndex.ChunkStartOffset < b.chunkIndex.ChunkStartOffset
 	}
 	// If comparing two messages in the same chunk, the earlier message in the chunk wins.
-	if a.messageIndexEntry != nil && b.messageIndexEntry != nil {
+	if a.isChunkIndex && b.isChunkIndex {
 		return a.messageIndexEntry.Offset < b.messageIndexEntry.Offset
 	}
 	// If we came this far, we're comparing a message in a chunk against the same chunk!
@@ -60,7 +61,7 @@ func (h rangeIndexHeap) Swap(i, j int) { h.indices[i], h.indices[j] = h.indices[
 // Push is required by `heap.Interface`. Note that this is not the same as `heap.Push`!
 // expected behavior by `heap` is: "add x as element len()".
 func (h *rangeIndexHeap) Push(x interface{}) {
-	h.indices = append(h.indices, x.(rangeIndex))
+	h.indices = append(h.indices, x.(*rangeIndex))
 }
 
 // Pop is required by `heap.Interface`. Note that this is not the same as `heap.Pop`!
@@ -79,29 +80,33 @@ func (h *rangeIndexHeap) Less(i, j int) bool {
 	case FileOrder:
 		return h.filePositionLess(i, j)
 	case LogTimeOrder:
-		if h.timestamp(i) == h.timestamp(j) {
+		its := h.timestamp(i)
+		jts := h.timestamp(j)
+		if its == jts {
 			return h.filePositionLess(i, j)
 		}
-		return h.timestamp(i) < h.timestamp(j)
+		return its < jts
 	case ReverseLogTimeOrder:
-		if h.timestamp(i) == h.timestamp(j) {
+		its := h.timestamp(i)
+		jts := h.timestamp(j)
+		if its == jts {
 			return h.filePositionLess(j, i)
 		}
-		return h.timestamp(i) > h.timestamp(j)
+		return its > jts
 	}
 	h.lastErr = fmt.Errorf("ReadOrder case not handled: %v", h.order)
 	return false
 }
 
-func (h *rangeIndexHeap) HeapPush(ri rangeIndex) error {
+func (h *rangeIndexHeap) HeapPush(ri *rangeIndex) error {
 	heap.Push(h, ri)
 	return h.lastErr
 }
 
 func (h *rangeIndexHeap) HeapPop() (*rangeIndex, error) {
-	result := heap.Pop(h).(rangeIndex)
+	result := heap.Pop(h).(*rangeIndex)
 	if h.lastErr != nil {
 		return nil, h.lastErr
 	}
-	return &result, nil
+	return result, nil
 }
